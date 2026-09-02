@@ -14,9 +14,9 @@
 /////////////////////////////// INCLUDES /////////////////////////////////////
 
 #include <ibtk/AppInitializer.h>
+#include <ibtk/IBTK_CHKERRQ.h>
 #include <ibtk/IBTK_MPI.h>
 #include <ibtk/LSiloDataWriter.h>
-#include <ibtk/ibtk_utilities.h>
 
 #include <tbox/Array.h>
 #include <tbox/Database.h>
@@ -30,12 +30,25 @@
 #include <tbox/Utilities.h>
 
 #include <petsclog.h>
+#include <petscoptions.h>
 #include <petscsys.h>
 
 #include <VisItDataWriter.h>
 
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <map>
 #include <ostream>
+#include <set>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 #include <ibtk/namespaces.h> // IWYU pragma: keep
@@ -45,6 +58,293 @@
 namespace IBTK
 {
 /////////////////////////////// STATIC ///////////////////////////////////////
+
+namespace
+{
+struct PetscOption
+{
+    std::string name;
+    std::string value;
+};
+
+void
+broadcast_string(std::string& value)
+{
+    int size = IBTK_MPI::getRank() == 0 ? static_cast<int>(value.size()) : 0;
+    size = IBTK_MPI::bcast(size, 0);
+    value.resize(size);
+    if (size > 0) IBTK_MPI::bcast(value.data(), size, 0);
+}
+
+std::filesystem::path
+resolve_petsc_options_file(const std::filesystem::path& advertised_path, const std::filesystem::path& input_filename)
+{
+    std::string resolved_path_string;
+    std::string error_message;
+    if (IBTK_MPI::getRank() == 0)
+    {
+        std::error_code error_code;
+        bool path_exists = std::filesystem::exists(advertised_path, error_code);
+        if (error_code)
+        {
+            error_message = "IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not inspect PETSc options file '" +
+                            advertised_path.string() + "': " + error_code.message();
+        }
+
+        std::filesystem::path resolved_path = advertised_path;
+        if (error_message.empty() && !path_exists)
+        {
+            const std::filesystem::path canonical_input = std::filesystem::weakly_canonical(input_filename, error_code);
+            if (error_code)
+            {
+                error_message = "IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not resolve input file '" +
+                                input_filename.string() + "': " + error_code.message();
+            }
+            else
+            {
+                resolved_path = canonical_input.parent_path() / advertised_path;
+                path_exists = std::filesystem::exists(resolved_path, error_code);
+                if (error_code)
+                {
+                    error_message = "IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not inspect PETSc options file '" +
+                                    resolved_path.string() + "': " + error_code.message();
+                }
+            }
+        }
+
+        if (error_message.empty() && !path_exists)
+        {
+            error_message =
+                "IBTK_PETSC_OPTIONS_FILE_MISSING: could not open PETSc options file '" + advertised_path.string() + "'";
+        }
+        if (error_message.empty())
+        {
+            const std::filesystem::path canonical_path = std::filesystem::weakly_canonical(resolved_path, error_code);
+            if (error_code)
+            {
+                error_message = "IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not resolve PETSc options file '" +
+                                resolved_path.string() + "': " + error_code.message();
+            }
+            else
+            {
+                resolved_path_string = canonical_path.string();
+            }
+        }
+    }
+
+    broadcast_string(error_message);
+    if (!error_message.empty()) TBOX_ERROR(error_message << '\n');
+    broadcast_string(resolved_path_string);
+    return std::filesystem::path(resolved_path_string);
+}
+
+std::string
+lowercase(const std::string& value)
+{
+    std::string result = value;
+    for (char& c : result)
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    return result;
+}
+
+bool
+is_ascii_letter(const char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+bool
+is_ascii_digit(const char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+bool
+is_settings_key(const std::string& key)
+{
+    return key == "petsc_settings" || key.compare(0, 15, "petsc_settings_") == 0;
+}
+
+std::vector<std::string>
+sorted_keys(Pointer<Database> db)
+{
+    const Array<std::string> keys = db->getAllKeys();
+    std::vector<std::string> result;
+    for (int k = 0; k < keys.size(); ++k) result.push_back(keys[k]);
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+struct SettingsBlock
+{
+    Pointer<Database> db;
+    std::string path;
+    std::string prefix;
+};
+
+void
+collect_settings(Pointer<Database> db, const std::string& path, std::vector<SettingsBlock>& blocks)
+{
+    for (const std::string& key : sorted_keys(db))
+    {
+        const std::string entry_path = path + "::" + key;
+        if (is_settings_key(key))
+        {
+            std::string prefix;
+            if (key != "petsc_settings")
+            {
+                const std::string tag = key.substr(15);
+                const bool valid =
+                    !tag.empty() && is_ascii_letter(tag.front()) &&
+                    (is_ascii_letter(tag.back()) || is_ascii_digit(tag.back())) &&
+                    std::all_of(tag.begin(),
+                                tag.end(),
+                                [](const char c) { return is_ascii_letter(c) || is_ascii_digit(c) || c == '_'; });
+                if (!valid) throw std::invalid_argument("IBTK_PETSC_SETTINGS_TAG: invalid tag at " + entry_path);
+                prefix = tag + "_";
+            }
+            if (!db->isDatabase(key))
+                throw std::invalid_argument("IBTK_PETSC_SETTINGS_BLOCK: expected database at " + entry_path);
+            blocks.push_back({ db->getDatabase(key), entry_path, prefix });
+        }
+        else if (db->isDatabase(key))
+        {
+            collect_settings(db->getDatabase(key), entry_path, blocks);
+        }
+    }
+}
+
+template <class T>
+std::string
+floating_point_to_string(const T value, const std::string& path)
+{
+    if (!std::isfinite(value)) throw std::invalid_argument("IBTK_PETSC_SETTINGS_NONFINITE: nonfinite value at " + path);
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::setprecision(std::numeric_limits<T>::max_digits10) << value;
+    return stream.str();
+}
+
+std::vector<PetscOption>
+validate_settings(const std::vector<SettingsBlock>& blocks)
+{
+    const std::set<std::string> controls = { "options_file", "options_file_yaml", "options_file_yaml_directory",
+                                             "prefix_pop",   "prefix_push",       "skip_petscrc" };
+    std::map<std::string, std::string> definitions;
+    std::vector<PetscOption> options;
+    for (const SettingsBlock& block : blocks)
+    {
+        for (const std::string& key : sorted_keys(block.db))
+        {
+            const std::string path = block.path + "::" + key;
+            if (key.empty() || key.front() == '-')
+                throw std::invalid_argument("IBTK_PETSC_SETTINGS_NAME: invalid leaf key at " + path);
+            const std::string name = "-" + block.prefix + key;
+            if (name.size() > 255)
+                throw std::invalid_argument("IBTK_PETSC_SETTINGS_LENGTH: expanded name exceeds 255 bytes at " + path);
+            PetscBool valid_key = PETSC_FALSE;
+            int ierr = PetscOptionsValidKey(name.c_str(), &valid_key);
+            IBTK_CHKERRQ(ierr);
+            if (!valid_key)
+                throw std::invalid_argument("IBTK_PETSC_SETTINGS_NAME: invalid expanded PETSc name at " + path);
+            if (controls.count(lowercase(key)) || controls.count(lowercase(name.substr(1))))
+                throw std::invalid_argument("IBTK_PETSC_SETTINGS_CONTROL: unsupported parser control at " + path);
+
+            const auto inserted = definitions.emplace(lowercase(name), path);
+            if (!inserted.second)
+                throw std::invalid_argument("IBTK_PETSC_SETTINGS_DUPLICATE: " + inserted.first->second + " and " +
+                                            path + " both define " + name);
+            if (block.db->isDatabase(key))
+                throw std::invalid_argument("IBTK_PETSC_SETTINGS_NESTED: settings must be flat at " + path);
+            if (block.db->getArraySize(key) != 1)
+                throw std::invalid_argument(
+                    "IBTK_PETSC_SETTINGS_ARRAY: expected a scalar Boolean, integer, "
+                    "floating-point value, or string at " +
+                    path);
+
+            std::string value;
+            switch (block.db->getArrayType(key))
+            {
+            case Database::SAMRAI_BOOL:
+                value = block.db->getBool(key) ? "true" : "false";
+                break;
+            case Database::SAMRAI_INT:
+                value = std::to_string(block.db->getInteger(key));
+                break;
+            case Database::SAMRAI_FLOAT:
+                value = floating_point_to_string(block.db->getFloat(key), path);
+                break;
+            case Database::SAMRAI_DOUBLE:
+                value = floating_point_to_string(block.db->getDouble(key), path);
+                break;
+            case Database::SAMRAI_STRING:
+                value = block.db->getString(key);
+                if (value.empty())
+                    throw std::invalid_argument("IBTK_PETSC_SETTINGS_EMPTY_STRING: empty string at " + path);
+                break;
+            default:
+                throw std::invalid_argument(
+                    "IBTK_PETSC_SETTINGS_TYPE: expected a scalar Boolean, integer, "
+                    "floating-point value, or string at " +
+                    path);
+            }
+            options.push_back({ name, value });
+        }
+    }
+    std::sort(
+        options.begin(), options.end(), [](const PetscOption& a, const PetscOption& b) { return a.name < b.name; });
+    return options;
+}
+
+void
+insert_petsc_options_file(const std::filesystem::path& advertised_path,
+                          const std::filesystem::path& input_filename,
+                          int argc,
+                          char* argv[])
+{
+    const std::filesystem::path resolved_path = resolve_petsc_options_file(advertised_path, input_filename);
+    const std::string resolved_path_string = resolved_path.string();
+
+    std::vector<std::string> argument_storage;
+    argument_storage.reserve(argc);
+    for (int k = 0; k < argc; ++k) argument_storage.emplace_back(argv[k]);
+    std::vector<char*> arguments;
+    arguments.reserve(argc + 1);
+    for (std::string& argument : argument_storage) arguments.push_back(argument.data());
+    arguments.push_back(nullptr);
+    int local_argc = argc;
+    char** local_argv = arguments.data();
+
+    int ierr = PetscOptionsInsert(nullptr, &local_argc, &local_argv, resolved_path_string.c_str());
+    IBTK_CHKERRQ(ierr);
+}
+
+} // namespace
+
+void
+AppInitializer::insertPetscSettings(Pointer<Database> input_db)
+{
+    std::vector<SettingsBlock> blocks;
+    collect_settings(input_db, "input", blocks);
+    if (!blocks.empty() && (input_db->keyExists("PETSC_OPTIONS_FILE") || input_db->keyExists("petsc_options_file")))
+        throw std::invalid_argument(
+            "IBTK_PETSC_SETTINGS_SOURCE_CONFLICT: settings and root PETSc options-file keys "
+            "are mutually exclusive");
+
+    // Validate the entire collection before HasName() changes used-state or SetValue() inserts anything.
+    const std::vector<PetscOption> options = validate_settings(blocks);
+    for (const PetscOption& option : options)
+    {
+        PetscBool present = PETSC_FALSE;
+        int ierr = PetscOptionsHasName(nullptr, nullptr, option.name.c_str(), &present);
+        IBTK_CHKERRQ(ierr);
+        if (!present)
+        {
+            ierr = PetscOptionsSetValue(nullptr, option.name.c_str(), option.value.c_str());
+            IBTK_CHKERRQ(ierr);
+        }
+    }
+}
 
 /////////////////////////////// PUBLIC ///////////////////////////////////////
 
@@ -85,15 +385,26 @@ AppInitializer::AppInitializer(int argc, char* argv[], const std::string& defaul
     d_input_db = new InputDatabase("input_db");
     InputManager::getManager()->parseInputFile(input_filename, d_input_db);
 
-    // Set a custom PETSc options file when one is specified.
-    load_petsc_options_file(d_input_db, argc, argv);
-
     // Process "Main" section of the input database.
     Pointer<Database> main_db = new NullDatabase();
     if (d_input_db->isDatabase("Main"))
     {
         main_db = d_input_db->getDatabase("Main");
     }
+
+    // Configure ordinary PETSc options used after application initialization.
+    try
+    {
+        insertPetscSettings(d_input_db);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        TBOX_ERROR(error.what() << '\n');
+    }
+    if (d_input_db->keyExists("PETSC_OPTIONS_FILE"))
+        insert_petsc_options_file(d_input_db->getString("PETSC_OPTIONS_FILE"), input_filename, argc, argv);
+    else if (d_input_db->keyExists("petsc_options_file"))
+        insert_petsc_options_file(d_input_db->getString("petsc_options_file"), input_filename, argc, argv);
 
     // Configure logging options.
     std::string log_file_name = default_log_file_name;

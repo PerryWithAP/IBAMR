@@ -38,6 +38,45 @@ namespace IBTK
 /*!
  * \brief Class AppInitializer provides functionality to simplify the
  * initialization code in an application code.
+ *
+ * Ordinary PETSc options used by calls to `Petsc*SetFromOptions()` made after
+ * construction may be supplied by flat `petsc_settings` or
+ * `petsc_settings_<tag>` databases anywhere in the input tree. An untagged
+ * leaf key `k` produces `-k`; a tagged key produces `-<tag>_<k>`.
+ * Tags start with an ASCII letter, contain letters, digits, or internal
+ * underscores, and end with a letter or digit. Case and internal underscores
+ * are preserved. Block locations and existing solver-prefix keys do not
+ * contribute prefixes or change a solver's configured prefix.
+ *
+ * Values must be single-element Booleans, integers, floats, doubles, or
+ * nonempty strings; floating-point values must be finite. Singleton arrays
+ * cannot be distinguished from scalars. Settings blocks must be flat.
+ * Expanded names must be valid PETSc names of at most 255 bytes including
+ * the leading dash. Case-insensitive duplicate names across all blocks are
+ * errors, even when their values agree. The entire collection is validated
+ * before insertion.
+ *
+ * Alternatively, the root keys `PETSC_OPTIONS_FILE` and `petsc_options_file`
+ * select a legacy file, with uppercase precedence. The file is sought as
+ * named, then relative to the canonical input-file directory. Nested file
+ * keys are ignored. Root file keys and settings blocks, including empty
+ * blocks, are mutually exclusive. Existing `petsc_options_*` entries retain
+ * their meanings and are not recognized as settings.
+ *
+ * Inline values do not affect PETSc initialization-time behavior. Existing
+ * ordinary PETSc options take precedence. Testing for an existing option with
+ * `PetscOptionsHasName()` marks that option as used and can affect
+ * `-options_left` reporting. PETSc aliases affecting these keys and an active
+ * global options-prefix stack are unsupported.
+ *
+ * Inline settings supply ordinary option values, not PETSc parser controls.
+ * Known file-source and prefix-push/pop controls are rejected; other
+ * version-specific parser controls are outside this interface.
+ * Legacy mode instead asks PETSc to parse a file and reprocess local copies
+ * of the original command line, so later ordinary command-line values win.
+ * It does not clear the existing options database or repeat initialization.
+ * File-source controls, aliases, prefix-stack state, and unusual positional
+ * arguments resembling PETSc keys are outside that precedence guarantee.
  */
 class AppInitializer : public SAMRAI::tbox::DescribedClass
 {
@@ -196,6 +235,9 @@ public:
     int getTimerDumpInterval() const;
 
 private:
+    // Throws std::invalid_argument before insertion if any settings definition is invalid.
+    static void insertPetscSettings(SAMRAI::tbox::Pointer<SAMRAI::tbox::Database> input_db);
+
     /*!
      * \brief Copy constructor.
      *
