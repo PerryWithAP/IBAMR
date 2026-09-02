@@ -247,7 +247,7 @@ validate_settings(const std::vector<SettingsBlock>& blocks)
             IBTK_CHKERRQ(ierr);
             if (!valid_key)
                 throw std::invalid_argument("IBTK_PETSC_SETTINGS_NAME: invalid expanded PETSc name at " + path);
-            if (controls.count(lowercase(key)) || controls.count(lowercase(name.substr(1))))
+            if (controls.count(lowercase(name.substr(1))))
                 throw std::invalid_argument("IBTK_PETSC_SETTINGS_CONTROL: unsupported parser control at " + path);
 
             const auto inserted = definitions.emplace(lowercase(name), path);

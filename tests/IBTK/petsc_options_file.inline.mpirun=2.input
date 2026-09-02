@@ -11,6 +11,7 @@ Main {
         enabled = TRUE
         cli_value = 11
         programmatic_value = 22
+        options_file = "ordinary-value.opts"
     }
 }
 Outer {
@@ -31,6 +32,7 @@ Expected {
     SP_disabled = FALSE
     SP_cli_value = 6606
     SP_programmatic_value = 7707
+    SP_options_file = "ordinary-value.opts"
     bottom_solver_ksp_type = "preonly"
     r00_negative = -17
     r00_double = 1.2345678901234567

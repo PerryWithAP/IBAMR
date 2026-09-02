@@ -70,8 +70,8 @@ namespace IBTK
  * global options-prefix stack are unsupported.
  *
  * Inline settings supply ordinary option values, not PETSc parser controls.
- * Known file-source and prefix-push/pop controls are rejected; other
- * version-specific parser controls are outside this interface.
+ * Expanded names matching known file-source and prefix-push/pop controls
+ * are rejected; other version-specific parser controls are outside this interface.
  * Legacy mode instead asks PETSc to parse a file and reprocess local copies
  * of the original command line, so later ordinary command-line values win.
  * It does not clear the existing options database or repeat initialization.
