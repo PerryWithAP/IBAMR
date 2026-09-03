@@ -67,39 +67,30 @@ std::filesystem::path
 resolve_petsc_options_file(const std::filesystem::path& advertised_path, const std::filesystem::path& input_filename)
 {
     std::string resolved_path_string;
-    std::string error_message;
     if (IBTK_MPI::getRank() == 0)
     {
         std::error_code error_code;
         bool path_exists = std::filesystem::exists(advertised_path, error_code);
         if (error_code)
-        {
-            error_message = "IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not inspect PETSc options file '" +
-                            advertised_path.string() + "': " + error_code.message();
-        }
+            TBOX_ERROR("IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not inspect PETSc options file '"
+                       << advertised_path.string() << "': " << error_code.message() << '\n');
 
         std::filesystem::path resolved_path = advertised_path;
-        if (error_message.empty() && !path_exists)
+        if (!path_exists)
         {
             resolved_path = input_filename.parent_path() / advertised_path;
             path_exists = std::filesystem::exists(resolved_path, error_code);
             if (error_code)
-            {
-                error_message = "IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not inspect PETSc options file '" +
-                                resolved_path.string() + "': " + error_code.message();
-            }
+                TBOX_ERROR("IBTK_PETSC_OPTIONS_FILESYSTEM_ERROR: could not inspect PETSc options file '"
+                           << resolved_path.string() << "': " << error_code.message() << '\n');
         }
 
-        if (error_message.empty() && !path_exists)
-        {
-            error_message =
-                "IBTK_PETSC_OPTIONS_FILE_MISSING: could not open PETSc options file '" + advertised_path.string() + "'";
-        }
-        if (error_message.empty()) resolved_path_string = resolved_path.string();
+        if (!path_exists)
+            TBOX_ERROR("IBTK_PETSC_OPTIONS_FILE_MISSING: could not open PETSc options file '"
+                       << advertised_path.string() << "'\n");
+        resolved_path_string = resolved_path.string();
     }
 
-    broadcast_string(error_message);
-    if (!error_message.empty()) TBOX_ERROR(error_message << '\n');
     broadcast_string(resolved_path_string);
     return std::filesystem::path(resolved_path_string);
 }
