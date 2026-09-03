@@ -67,15 +67,6 @@ struct PetscOption
     std::string value;
 };
 
-void
-broadcast_string(std::string& value)
-{
-    int size = IBTK_MPI::getRank() == 0 ? static_cast<int>(value.size()) : 0;
-    size = IBTK_MPI::bcast(size, 0);
-    value.resize(size);
-    if (size > 0) IBTK_MPI::bcast(value.data(), size, 0);
-}
-
 std::filesystem::path
 resolve_petsc_options_file(const std::filesystem::path& advertised_path, const std::filesystem::path& input_filename)
 {
@@ -132,31 +123,18 @@ resolve_petsc_options_file(const std::filesystem::path& advertised_path, const s
         }
     }
 
-    broadcast_string(error_message);
+    IBTK_MPI::bcast(error_message, 0);
     if (!error_message.empty()) TBOX_ERROR(error_message << '\n');
-    broadcast_string(resolved_path_string);
+    IBTK_MPI::bcast(resolved_path_string, 0);
     return std::filesystem::path(resolved_path_string);
 }
 
 std::string
-lowercase(const std::string& value)
+lowercase(std::string value)
 {
-    std::string result = value;
-    for (char& c : result)
-        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-    return result;
-}
-
-bool
-is_ascii_letter(const char c)
-{
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-}
-
-bool
-is_ascii_digit(const char c)
-{
-    return c >= '0' && c <= '9';
+    const auto& facet = std::use_facet<std::ctype<char>>(std::locale::classic());
+    facet.tolower(value.data(), value.data() + value.size());
+    return value;
 }
 
 bool
@@ -194,12 +172,12 @@ collect_settings(Pointer<Database> db, const std::string& path, std::vector<Sett
             if (key != "petsc_settings")
             {
                 const std::string tag = key.substr(15);
-                const bool valid =
-                    !tag.empty() && is_ascii_letter(tag.front()) &&
-                    (is_ascii_letter(tag.back()) || is_ascii_digit(tag.back())) &&
-                    std::all_of(tag.begin(),
-                                tag.end(),
-                                [](const char c) { return is_ascii_letter(c) || is_ascii_digit(c) || c == '_'; });
+                const auto& locale = std::locale::classic();
+                const bool valid = !tag.empty() && std::isalpha(tag.front(), locale) &&
+                                   std::isalnum(tag.back(), locale) &&
+                                   std::all_of(tag.begin(),
+                                               tag.end(),
+                                               [&locale](const char c) { return std::isalnum(c, locale) || c == '_'; });
                 if (!valid) throw std::invalid_argument("IBTK_PETSC_SETTINGS_TAG: invalid tag at " + entry_path);
                 prefix = tag + "_";
             }
