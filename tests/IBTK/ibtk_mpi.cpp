@@ -19,7 +19,6 @@
 
 #include <fstream>
 #include <limits>
-#include <string>
 
 #include <ibtk/app_namespaces.h>
 
@@ -90,16 +89,6 @@ main(int argc, char* argv[])
     passed = IBTK::IBTK_MPI::maxReduction(passed ? 1 : 0);
     if (!rank) output_file << "bcast test " << (passed ? "passed" : "failed") << ".\n";
 
-    bool strings_passed = true;
-    for (const std::string& expected : { std::string("broadcast"), std::string(), std::string("a\0b", 3) })
-    {
-        std::string value = rank == num_nodes - 1 ? expected : "not root";
-        IBTK::IBTK_MPI::bcast(value, num_nodes - 1);
-        strings_passed = strings_passed && value == expected;
-    }
-    strings_passed = IBTK::IBTK_MPI::minReduction(strings_passed ? 1 : 0);
-    if (!rank) output_file << "string bcast test " << (strings_passed ? "passed" : "failed") << ".\n";
-
     passed = sendAndRecv(x, (x - 1 + num_nodes) % num_nodes);
 
     passed = IBTK::IBTK_MPI::maxReduction(passed ? 1 : 0);
@@ -110,7 +99,6 @@ main(int argc, char* argv[])
     if (!rank) output_file << "all gather test " << (passed ? "passed" : "failed") << ".\n";
 
     if (!rank) output_file.close();
-    return strings_passed ? 0 : 1;
 } // main
 
 template <typename T>

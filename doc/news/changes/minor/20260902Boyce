@@ -1,3 +1,0 @@
-New: IBTK::IBTK_MPI::bcast() supports strings.
-<br>
-(Boyce Griffith, 2026/09/02)

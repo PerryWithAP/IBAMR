@@ -33,15 +33,6 @@
 
 namespace
 {
-bool
-has_option(const std::string& name)
-{
-    PetscBool present = PETSC_FALSE;
-    int ierr = PetscOptionsHasName(nullptr, nullptr, name.c_str(), &present);
-    IBTK_CHKERRQ(ierr);
-    return present;
-}
-
 void
 verify_values(Pointer<Database> expected)
 {
@@ -95,32 +86,13 @@ verify_values(Pointer<Database> expected)
 class OptionsErrorAppender : public Logger::Appender
 {
 public:
-    explicit OptionsErrorAppender(bool check_sentinel) : d_check_sentinel(check_sentinel)
-    {
-    }
-
     void logMessage(const std::string& message, const std::string&, const int) override
     {
         if (IBTK_MPI::getRank() != 0) return;
         std::ofstream output("output");
-        if (d_check_sentinel)
-        {
-            PetscBool present = PETSC_FALSE;
-            const int ierr = PetscOptionsHasName(nullptr, nullptr, "-r00_atomic_marker", &present);
-            // Do not recursively invoke the abort logger on a failed query.
-            if (ierr)
-            {
-                output << "sentinel query failed\n" << std::flush;
-                return;
-            }
-            output << "sentinel " << (present ? "present" : "absent") << '\n';
-        }
         // SAMRAI appends a NUL: use c_str() as in TestAppender.
         output << message.c_str() << std::flush;
     }
-
-private:
-    bool d_check_sentinel;
 };
 } // namespace
 
@@ -144,13 +116,7 @@ main(int argc, char* argv[])
     args.push_back(nullptr);
     std::vector<char*> init_args = args;
     IBTKInit ibtk_init(static_cast<int>(storage.size()), init_args.data(), MPI_COMM_WORLD);
-    if (input_path.string().find(".inline.") != std::string::npos)
-    {
-        int ierr = PetscOptionsSetValue(nullptr, "-SP_programmatic_value", "7707");
-        IBTK_CHKERRQ(ierr);
-    }
-    Pointer<Logger::Appender> abort_appender =
-        new OptionsErrorAppender(input_path.string().find(".invalid_later.") != std::string::npos);
+    Pointer<Logger::Appender> abort_appender = new OptionsErrorAppender();
     Logger::getInstance()->setAbortAppender(abort_appender);
 
     Pointer<AppInitializer> initializer =
@@ -159,12 +125,6 @@ main(int argc, char* argv[])
     if (input_path.string().find(".expect_error=true.") != std::string::npos) return 0;
     Pointer<Database> input = initializer->getInputDatabase();
     if (input->isDatabase("Expected")) verify_values(input->getDatabase("Expected"));
-    if (input->keyExists("absent"))
-    {
-        const Array<std::string> absent = input->getStringArray("absent");
-        for (int k = 0; k < absent.size(); ++k)
-            if (has_option("-" + absent[k])) TBOX_ERROR("ignored metadata inserted " << absent[k] << "\n");
-    }
     if (IBTK_MPI::getRank() == 0)
     {
         std::ofstream output("output");

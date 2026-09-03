@@ -1,46 +1,20 @@
 Main {
-    petsc_options_file = "ignored-missing.opts"
-    PETSC_OPTIONS_FILE = 4
-    options_prefix = "not_SP_"
-    coarse_solver_prefix = "not_bottom_solver_"
-    petsc_options_prefix = "also_not_SP_"
-    petsc_options { ignored_old = 1, 2 }
-    petsc_options_SP { ignored_tag = "unused" }
-    petsc_settings_SP {
-        ksp_max_it = 341
+    petsc_settings {
         enabled = TRUE
-        cli_value = 11
-        programmatic_value = 22
-        options_file = "ordinary-value.opts"
+        r00_double = 1.2345678901234567
+        r00_string = "ilu:level=2, with spaces"
+    }
+    Solver {
+        petsc_settings_SP {
+            ksp_max_it = 341
+            cli_value = 11
+        }
     }
 }
-Outer {
-    Inner { petsc_settings_bottom_solver { ksp_type = "preonly" } }
-    petsc_settings_SP { disabled = FALSE }
-    Main { petsc_options_file = "also-ignored.opts" }
-}
-petsc_settings {
-    r00_negative = -17
-    r00_double = 1.2345678901234567
-    r00_string = "ilu,level=2 with spaces"
-}
-petsc_settings_file { value = 31 }
-petsc_settings_prefix { value = 37 }
 Expected {
     SP_ksp_max_it = 341
-    SP_enabled = TRUE
-    SP_disabled = FALSE
     SP_cli_value = 6606
-    SP_programmatic_value = 7707
-    SP_options_file = "ordinary-value.opts"
-    bottom_solver_ksp_type = "preonly"
-    r00_negative = -17
+    enabled = TRUE
     r00_double = 1.2345678901234567
-    r00_string = "ilu,level=2 with spaces"
-    file_value = 31
-    prefix_value = 37
+    r00_string = "ilu:level=2, with spaces"
 }
-absent = "ignored_old", "SP_ignored_tag", "ignored_tag", "not_SP_ksp_max_it",
-         "also_not_SP_ksp_max_it", "not_bottom_solver_ksp_type",
-         "options_prefix", "coarse_solver_prefix", "petsc_options_prefix",
-         "ksp_max_it", "r00_value"

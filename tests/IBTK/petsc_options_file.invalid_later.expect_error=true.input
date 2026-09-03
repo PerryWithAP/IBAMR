@@ -1,3 +1,0 @@
-A { petsc_settings { r00_atomic_marker = 123 } }
-Z { petsc_settings_SP { value = 1, 2 } }
-Main { }

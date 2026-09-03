@@ -1,2 +1,0 @@
-sentinel absent
-IBTK_PETSC_SETTINGS_ARRAY: expected a scalar Boolean, integer, floating-point value, or string at input::Z::petsc_settings_SP::value

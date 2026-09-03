@@ -22,7 +22,6 @@
 
 #include <mpi.h>
 
-#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -187,13 +186,6 @@ struct IBTK_MPI
     template <typename T>
     static void bcast(T* x, int& length, const int root);
     //@}
-
-    /**
-     * Broadcast a string from the specified root using the current communicator.
-     * Resize the receiving strings and preserve all bytes, including embedded NULs.
-     * Empty strings are supported. The root string's size must fit in an MPI int count.
-     */
-    static void bcast(std::string& x, int root);
 
     /*!
      * @brief This function sends an MPI message with an array to another processer.

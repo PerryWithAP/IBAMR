@@ -22,4 +22,4 @@ OUTPUT_DIR="$2"
 
 # We have to avoid using loops or other such things to work with weird file
 # names (e.g., paths that include spaces)
-find "$INPUT_DIR" \( -name '*.input' -o -name '*.output' \) -exec ln -f -s {} "$OUTPUT_DIR" \;
+find "$INPUT_DIR" \( -name '*.input' -o -name '*.output' -o -name '*.opts' \) -exec ln -f -s {} "$OUTPUT_DIR" \;

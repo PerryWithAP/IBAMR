@@ -18,7 +18,6 @@
 #include <tbox/SAMRAI_MPI.h>
 #include <tbox/Utilities.h>
 
-#include <limits>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -87,21 +86,6 @@ IBTK_MPI::allToOneSumReduction(int* x, const int n, const int root)
         }
     }
 } // allToOneSumReduction
-
-void
-IBTK_MPI::bcast(std::string& x, const int root)
-{
-    int length = 0;
-    if (getRank() == root)
-        length = x.size() > static_cast<std::string::size_type>(std::numeric_limits<int>::max()) ?
-                     -1 :
-                     static_cast<int>(x.size());
-    // Share an invalid count before reporting it so no rank waits for the payload.
-    length = bcast(length, root);
-    if (length < 0) TBOX_ERROR("IBTK_MPI::bcast: string size exceeds the MPI int count range\n");
-    x.resize(length);
-    if (length > 0) bcast(x.data(), length, root);
-} // bcast
 
 void
 IBTK_MPI::sendBytes(const void* buf, const int number_bytes, const int receiving_proc_number)
