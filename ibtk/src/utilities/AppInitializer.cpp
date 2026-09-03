@@ -36,15 +36,14 @@
 #include <VisItDataWriter.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <filesystem>
-#include <iomanip>
 #include <limits>
 #include <locale>
 #include <map>
 #include <ostream>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -197,10 +196,13 @@ std::string
 floating_point_to_string(const T value, const std::string& path)
 {
     if (!std::isfinite(value)) throw std::invalid_argument("IBTK_PETSC_SETTINGS_NONFINITE: nonfinite value at " + path);
-    std::ostringstream stream;
-    stream.imbue(std::locale::classic());
-    stream << std::setprecision(std::numeric_limits<T>::max_digits10) << value;
-    return stream.str();
+    // Allow space for the sign, decimal point, and exponent as well as the significant digits.
+    char buffer[std::numeric_limits<T>::max_digits10 + 16];
+    const auto result = std::to_chars(
+        buffer, buffer + sizeof(buffer), value, std::chars_format::general, std::numeric_limits<T>::max_digits10);
+    if (result.ec != std::errc{})
+        throw std::invalid_argument("IBTK_PETSC_SETTINGS_CONVERSION: could not format floating-point value at " + path);
+    return std::string(buffer, result.ptr);
 }
 
 std::vector<PetscOption>
