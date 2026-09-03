@@ -1,6 +1,8 @@
 Main {
     petsc_settings {
         ksp_type = "fgmres"
+        r00_bool = TRUE
+        r00_string = "ilu:level=2, with spaces"
     }
     petsc_settings_SP {
         pc_type = "none"
@@ -29,6 +31,8 @@ PoissonMultigridPreconditioner {
 
 Expected {
     ksp_type = "fgmres"
+    r00_bool = TRUE
+    r00_string = "ilu:level=2, with spaces"
     SP_pc_type = "jacobi"
     poisson_rtol = 1.0e-12
     poisson_atol = "0.0"
