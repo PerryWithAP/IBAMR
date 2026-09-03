@@ -36,10 +36,10 @@
 #include <VisItDataWriter.h>
 
 #include <charconv>
-#include <cmath>
 #include <filesystem>
 #include <limits>
 #include <ostream>
+#include <set>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -114,7 +114,6 @@ template <class T>
 std::string
 floating_point_to_string(const T value)
 {
-    if (!std::isfinite(value)) TBOX_ERROR("PETSc settings must contain finite floating-point values\n");
     // Allow space for the sign, decimal point, and exponent as well as the significant digits.
     char buffer[std::numeric_limits<T>::max_digits10 + 16];
     const auto result = std::to_chars(
@@ -145,7 +144,7 @@ insert_petsc_options(const std::string& options_file, int argc, char* argv[])
 } // namespace
 
 bool
-AppInitializer::insertPetscSettings(Pointer<Database> input_db)
+AppInitializer::insertPetscSettings(Pointer<Database> input_db, std::set<std::string>& option_names)
 {
     bool found_settings = false;
     const Array<std::string> database_keys = input_db->getAllKeys();
@@ -154,7 +153,8 @@ AppInitializer::insertPetscSettings(Pointer<Database> input_db)
         const std::string& database_key = database_keys[database_key_n];
         if (!is_settings_key(database_key))
         {
-            if (input_db->isDatabase(database_key) && insertPetscSettings(input_db->getDatabase(database_key)))
+            if (input_db->isDatabase(database_key) &&
+                insertPetscSettings(input_db->getDatabase(database_key), option_names))
                 found_settings = true;
             continue;
         }
@@ -195,6 +195,8 @@ AppInitializer::insertPetscSettings(Pointer<Database> input_db)
             }
 
             const std::string name = "-" + prefix + key;
+            if (!option_names.insert(name).second)
+                TBOX_ERROR("PETSc option '" << name << "' is defined more than once in inline settings\n");
             int ierr = PetscOptionsSetValue(nullptr, name.c_str(), value.c_str());
             IBTK_CHKERRQ(ierr);
         }
@@ -249,7 +251,8 @@ AppInitializer::AppInitializer(int argc, char* argv[], const std::string& defaul
     }
 
     // Configure PETSc options and then reapply normal PETSc sources so command-line options win.
-    const bool found_settings = insertPetscSettings(d_input_db);
+    std::set<std::string> option_names;
+    const bool found_settings = insertPetscSettings(d_input_db, option_names);
     const bool has_options_file =
         d_input_db->keyExists("PETSC_OPTIONS_FILE") || d_input_db->keyExists("petsc_options_file");
     if (found_settings && has_options_file)

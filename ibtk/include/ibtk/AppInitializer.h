@@ -28,6 +28,7 @@
 
 #include <VisItDataWriter.h>
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -203,7 +204,8 @@ public:
     int getTimerDumpInterval() const;
 
 private:
-    static bool insertPetscSettings(SAMRAI::tbox::Pointer<SAMRAI::tbox::Database> input_db);
+    static bool insertPetscSettings(SAMRAI::tbox::Pointer<SAMRAI::tbox::Database> input_db,
+                                    std::set<std::string>& option_names);
 
     /*!
      * \brief Copy constructor.

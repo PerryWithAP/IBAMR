@@ -110,7 +110,7 @@ main(int argc, char* argv[])
     if (input_path.string().find(".lowercase.") != std::string::npos)
         storage.insert(storage.end(), { "-r00_value", "4404" });
     if (input_path.string().find(".inline.") != std::string::npos)
-        storage.insert(storage.end(), { "-SP_cli_value", "6606" });
+        storage.insert(storage.end(), { "-SP_pc_type", "jacobi" });
     std::vector<char*> args;
     for (std::string& value : storage) args.push_back(value.data());
     args.push_back(nullptr);
